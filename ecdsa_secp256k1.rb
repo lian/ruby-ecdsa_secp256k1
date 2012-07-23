@@ -1,6 +1,3 @@
-## /home/chris/mess/2009/08/e.rb
-require 'zlib'
-
 class Curve < Struct.new(:p, :a, :b)
   def contains_point(x, y)
     return (y*y - (x*x*x + a*x + b)) % p == 0
@@ -16,23 +13,24 @@ class Point < Struct.new(:curve, :x, :y, :order)
 
     if x == other.x
       if (y+other.y) % p == 0
-        INF
+        return INF
       else
-        double
+        return double
       end
-    else
-      p = curve.p
-      l = ((other.y - y) * NumberTheory.inverse_mod(other.x - x, p)) % p
-      x3 = (l * l - x - other.x) % p
-      y3 = (l * (x - x3) - y) % p
-      Point.new(curve, x3, y3)
     end
+
+    p = curve.p
+    l = ((other.y - y) * NumberTheory.inverse_mod(other.x - x, p)) % p
+    x3 = (l * l - x - other.x) % p
+    y3 = (l * (x - x3) - y) % p
+    Point.new(curve, x3, y3)
   end
 
   def *(other)
     e = other
     e %= order  if order
     return INF  if e == 0 || self == INF
+    #raise "foo" unless e > 0
     
     e3 = 3 * e
     neg_self = Point.new(curve, x, -y, order)
@@ -49,6 +47,7 @@ class Point < Struct.new(:curve, :x, :y, :order)
   end
 
   def double
+    #return INF if self == INF
     p = curve.p; a = curve.a
     l = ((3*x * x + a) * NumberTheory.inverse_mod(2*y, p)) % p
     x3 = (l * l - 2*x) % p
@@ -70,19 +69,13 @@ module NumberTheory
     a = a % m  if a < 0 || m <= a 
 
     # From Ferguson and Schneier, roughly:
-    
-    c, d = a, m
-    uc, vc, ud, vd = 1, 0, 0, 1
+    c, d, uc, vc, ud, vd = a, m, 1, 0, 0, 1
     while c != 0
       q, c, d = d.divmod(c) << c
       uc, vc, ud, vd = ud - q*uc, vd - q*vc, uc, vc
     end
 
-    if ud > 0
-      ud
-    else
-      ud + m
-    end
+    ud > 0 ? ud : ud + m
   end
 end
 
@@ -90,13 +83,16 @@ class PublicKey < Struct.new(:generator, :point)
   def initialize(generator, point)
     super
     @curve = generator.curve
+    n = generator.order
+    raise "Generator point must have order." unless n
+    if (point.x < 0) or (n <= point.x) or (point.y < 0) or (n <= point.y)
+      raise "Generator point has x or y out of range."
+    end
   end
 
   def verifies(hash, signature)
-    g = generator
-    n = g.order
-    r = signature.r
-    s = signature.s
+    g, n = generator, generator.order
+    r, s = signature.r, signature.s
     return false  if r < 1 || r > n-1 || s < 1 || s > n-1
     c = NumberTheory.inverse_mod(s, n)
     u1 = (hash * c) % n
@@ -105,6 +101,10 @@ class PublicKey < Struct.new(:generator, :point)
     v = xy.x % n
     v == r
   end
+
+  def to_s
+    "04%064x%064x" % [point.x, point.y]
+  end
 end
 
 class Signature < Struct.new(:r, :s)
@@ -112,20 +112,32 @@ class Signature < Struct.new(:r, :s)
     new(*str.unpack("m*").first.unpack("w2"))
   end
 
-  def to_s(pubkey)
-    p Math.log(r)/Math.log(2)
-    p Math.log(s)/Math.log(2)
-    p Math.log(pubkey.point.x)/Math.log(2)
-    p Math.log(pubkey.point.y)/Math.log(2)
-    p [r, s, pubkey.point.x, pubkey.point.y].pack("w*").size
-    [[r, s, pubkey.point.x, pubkey.point.y].pack("w*")].pack("m*")
+  def to_s(pubkey=nil)
+    # p Math.log(r)/Math.log(2)
+    # p Math.log(s)/Math.log(2)
+    # p Math.log(pubkey.point.x)/Math.log(2)
+    # p Math.log(pubkey.point.y)/Math.log(2)
+    # p [r, s, pubkey.point.x, pubkey.point.y].pack("w*").size
+    #[[r, s, pubkey.point.x, pubkey.point.y].pack("w*")].pack("m*")
+    #[r, s, pubkey.point.x, pubkey.point.y].pack("w*").unpack("H*")[0]
+    #if pubkey
+    #  [r, s, pubkey.point.x, pubkey.point.y].pack("w*").unpack("H*")[0]
+    #else
+    #  [r, s].pack("w*").unpack("H*")[0]
+    #end
+    #"04%064x%064x" % [r,s]
+    [r, s].pack("w*").unpack("H*")[0]
   end
 end
 
 class PrivateKey < Struct.new(:public_key, :secret_multiplier)
-  def sign(hash, nonce)
-    g = public_key.generator
-    n = g.order
+  def to_s
+    "%064x" % secret_multiplier
+  end
+
+  def sign(hash, nonce=nil)
+    g, n = public_key.generator, public_key.generator.order
+    nonce = rand(n) + 1 unless nonce
     k = nonce % n
     p1 = g * k
     r = p1.x
@@ -136,34 +148,43 @@ class PrivateKey < Struct.new(:public_key, :secret_multiplier)
   end
 end
 
-# NIST Curve P-192:
-_p = 6277101735386680763835789423207666416083908700390324961279
-_r = 6277101735386680763835789423176059013767194773182842284081
-# s = 0x3045ae6fc8422f64ed579528d38120eae12196d5
-# c = 0x3099d2bbbfcb2538542dcd5fb078b6ef5f3d6fe2c745de65
-_b = 0x64210519e59c80e70fa7e9ab72243049feb8deecc146b9b1
-_Gx = 0x188da80eb03090f67cbf20eb43a18800f4ff0afd82ff1012
-_Gy = 0x07192b95ffc8da78631011ed6b24cdd573f977a11e794811
+module Secp256k1
+  P  = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
+  A  = 0x0000000000000000000000000000000000000000000000000000000000000000
+  B  = 0x0000000000000000000000000000000000000000000000000000000000000007
+  Gx = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798
+  Gy = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8
+  R  = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+  Curve     = Curve.new(P, A, B)
+  Generator = Point.new(Curve, Gx, Gy, R)
 
-curve_192 = Curve.new( _p, -3, _b )
-generator_192 = Point.new( curve_192, _Gx, _Gy, _r )
+  def self.nonce; rand(Generator.order) + 1; end
+
+  def self.generate(secret=nil)
+    g = Generator
+    secret  = rand(g.order) + 1 unless secret
+    pubkey  = PublicKey.new( g, g * secret )
+    privkey = PrivateKey.new( pubkey, secret )
+    [pubkey, privkey]
+  end
+end
 
 
-  g = generator_192
-  n = g.order
-  secret = rand(n) + 1
-  pubkey = PublicKey.new( g, g * secret )
-  privkey = PrivateKey.new( pubkey, secret )
+#100.times{|n|
+#  pubkey, privkey = Secp256k1.generate(n+1)
+#  p [n, pubkey.to_s]
+#}
 
-p [pubkey, privkey]
+pubkey, privkey = Secp256k1.generate
 
-  hash = rand(n) + 1
-  signature = privkey.sign(hash, rand(n) + 1)
+hash = rand(Secp256k1::Generator.order) + 1
+signature = privkey.sign(hash)
 
-p hash
-p signature
-puts signature.to_s(pubkey)
+p hash.to_s(16)
+#p signature
+#p signature.to_s(pubkey)
+p [privkey.to_s, pubkey.to_s]
+p signature.to_s
 
 p pubkey.verifies(hash, signature)
 p pubkey.verifies(hash-1, signature)
-
