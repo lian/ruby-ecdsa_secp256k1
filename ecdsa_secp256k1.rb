@@ -1,3 +1,5 @@
+require 'securerandom'
+
 class Curve < Struct.new(:p, :a, :b)
   def contains_point(x, y)
     return (y*y - (x*x*x + a*x + b)) % p == 0
@@ -113,19 +115,6 @@ class Signature < Struct.new(:r, :s)
   end
 
   def to_s(pubkey=nil)
-    # p Math.log(r)/Math.log(2)
-    # p Math.log(s)/Math.log(2)
-    # p Math.log(pubkey.point.x)/Math.log(2)
-    # p Math.log(pubkey.point.y)/Math.log(2)
-    # p [r, s, pubkey.point.x, pubkey.point.y].pack("w*").size
-    #[[r, s, pubkey.point.x, pubkey.point.y].pack("w*")].pack("m*")
-    #[r, s, pubkey.point.x, pubkey.point.y].pack("w*").unpack("H*")[0]
-    #if pubkey
-    #  [r, s, pubkey.point.x, pubkey.point.y].pack("w*").unpack("H*")[0]
-    #else
-    #  [r, s].pack("w*").unpack("H*")[0]
-    #end
-    #"04%064x%064x" % [r,s]
     [r, s].pack("w*").unpack("H*")[0]
   end
 end
@@ -145,7 +134,7 @@ class PrivateKey < Struct.new(:public_key, :secret_multiplier)
 
   def sign(hash, nonce=nil)
     g, n = public_key.generator, public_key.generator.order
-    nonce = rand(n) + 1 unless nonce
+    nonce = SecureRandom.random_number(n) + 1 unless nonce
     k = nonce % n
     p1 = g * k
     r = p1.x
@@ -166,11 +155,11 @@ module Secp256k1
   Curve     = Curve.new(P, A, B)
   Generator = Point.new(Curve, Gx, Gy, R)
 
-  def self.nonce; rand(Generator.order) + 1; end
+  def self.nonce; SecureRandom.random_number(Generator.order) + 1; end
 
   def self.generate(secret=nil)
     g = Generator
-    secret  = rand(g.order) + 1 unless secret
+    secret  = nonce unless secret
     pubkey  = PublicKey.new( g, g * secret )
     privkey = PrivateKey.new( pubkey, secret )
     [pubkey, privkey]
@@ -178,20 +167,12 @@ module Secp256k1
 end
 
 
-#100.times{|n|
-#  pubkey, privkey = Secp256k1.generate(n+1)
-#  p [n, pubkey.to_s]
-#  p privkey.to_der
-#}
-
 pubkey, privkey = Secp256k1.generate
 
-hash = rand(Secp256k1::Generator.order) + 1
+hash = Secp256k1.nonce
 signature = privkey.sign(hash)
 
 p hash.to_s(16)
-#p signature
-#p signature.to_s(pubkey)
 p [privkey.to_s, pubkey.to_s]
 p signature.to_s
 
