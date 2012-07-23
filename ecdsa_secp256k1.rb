@@ -135,6 +135,14 @@ class PrivateKey < Struct.new(:public_key, :secret_multiplier)
     "%064x" % secret_multiplier
   end
 
+  def to_der
+    [ '06052b8104000a30740201010420' +
+      '%064x' % secret_multiplier +
+      'a00706052b8104000aa14403420004' +
+      '%064x' % public_key.point.x +
+      '%064x' % public_key.point.y ].pack("H*")
+  end
+
   def sign(hash, nonce=nil)
     g, n = public_key.generator, public_key.generator.order
     nonce = rand(n) + 1 unless nonce
@@ -173,6 +181,7 @@ end
 #100.times{|n|
 #  pubkey, privkey = Secp256k1.generate(n+1)
 #  p [n, pubkey.to_s]
+#  p privkey.to_der
 #}
 
 pubkey, privkey = Secp256k1.generate
