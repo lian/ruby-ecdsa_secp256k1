@@ -82,6 +82,10 @@ module NumberTheory
 end
 
 class PublicKey < Struct.new(:generator, :point)
+  def to_s
+    "04%064x%064x" % [point.x, point.y]
+  end
+
   def initialize(generator, point)
     super
     @curve = generator.curve
@@ -103,10 +107,6 @@ class PublicKey < Struct.new(:generator, :point)
     v = xy.x % n
     v == r
   end
-
-  def to_s
-    "04%064x%064x" % [point.x, point.y]
-  end
 end
 
 class Signature < Struct.new(:r, :s)
@@ -124,13 +124,31 @@ class PrivateKey < Struct.new(:public_key, :secret_multiplier)
     "%064x" % secret_multiplier
   end
 
+  # uncompressed DER format in binary
   def to_der
-    [ '06052b8104000a30740201010420' +
+    # private keys are 279 bytes long (see crypto/ec/cec_asn1.c)
+    [ '308201130201010420' +
       '%064x' % secret_multiplier +
-      'a00706052b8104000aa14403420004' +
+      'a081a53081a2020101302c06072a8648ce3d0101022100' +
+      '%064x' % public_key.generator.curve.p +
+      '3006040100040107044104' +
+      '%064x' % public_key.generator.x +
+      '%064x' % public_key.generator.y +
+      '022100' +
+      '%064x' % public_key.generator.order +
+      '020101a14403420004' +
       '%064x' % public_key.point.x +
       '%064x' % public_key.point.y ].pack("H*")
   end
+
+  # # compressed DER format in binary
+  # def to_der_compressed
+  #   [ '06052b8104000a30740201010420' +
+  #     '%064x' % secret_multiplier +
+  #     'a00706052b8104000aa14403420004' +
+  #     '%064x' % public_key.point.x +
+  #     '%064x' % public_key.point.y ].pack("H*")
+  # end
 
   def sign(hash, nonce=nil)
     g, n = public_key.generator, public_key.generator.order
@@ -172,9 +190,16 @@ pubkey, privkey = Secp256k1.generate
 hash = Secp256k1.nonce
 signature = privkey.sign(hash)
 
-p hash.to_s(16)
 p [privkey.to_s, pubkey.to_s]
+p hash.to_s(16)
 p signature.to_s
+
+p privkey.to_der.size
+p privkey.to_der.unpack("H*")[0]
+
+require 'openssl'
+p OpenSSL::PKey::EC.new(privkey.to_der).private_key.to_i.to_s(16).rjust(64, '0')
+p OpenSSL::PKey::EC.new(privkey.to_der).public_key.to_bn.to_i.to_s(16).rjust(130, '0')
 
 p pubkey.verifies(hash, signature)
 p pubkey.verifies(hash-1, signature)
