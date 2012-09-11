@@ -111,11 +111,13 @@ end
 
 class Signature < Struct.new(:r, :s)
   def parse(str)
-    new(*str.unpack("m*").first.unpack("w2"))
+    #new(*str.unpack("m*").first.unpack("w2"))
+    new(*str.each_slice(64).map{|i| i.to_i(16) })
   end
 
   def to_s(pubkey=nil)
-    [r, s].pack("w*").unpack("H*")[0]
+    #[r, s].pack("w*").unpack("H*")[0]
+    [r,s].map{|i| i.to_s(16).rjust(64, '0') }.join
   end
 end
 
@@ -185,6 +187,13 @@ module Secp256k1
 end
 
 
+pubkey, privkey = Secp256k1.generate
+p [privkey.to_s, pubkey.to_s]
+
+signature = privkey.sign( 100 )
+p signature.to_s
+
+__END__
 pubkey, privkey = Secp256k1.generate
 
 hash = Secp256k1.nonce
