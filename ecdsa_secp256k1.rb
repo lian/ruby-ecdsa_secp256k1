@@ -1,4 +1,5 @@
 require 'securerandom'
+require 'digest/sha1'
 
 class Curve < Struct.new(:p, :a, :b)
   def contains_point(x, y)
@@ -83,7 +84,7 @@ end
 
 class PublicKey < Struct.new(:generator, :point)
   def to_s
-    "04%064x%064x" % [point.x, point.y]
+    "04%064x%064x" % [point.x, point.y] # uncompressed representation
   end
 
   def initialize(generator, point)
@@ -96,7 +97,8 @@ class PublicKey < Struct.new(:generator, :point)
     end
   end
 
-  def verifies(hash, signature)
+  def verify(hash, signature)
+    hash = Digest::SHA256.hexdigest(hash).to_i(16) if hash.is_a?(String) # data to hash number
     g, n = generator, generator.order
     r, s = signature.r, signature.s
     return false  if r < 1 || r > n-1 || s < 1 || s > n-1
@@ -110,13 +112,12 @@ class PublicKey < Struct.new(:generator, :point)
 end
 
 class Signature < Struct.new(:r, :s)
+  # contains only displaying stuff. the signature is nothing more than r and s values.
   def parse(str)
-    #new(*str.unpack("m*").first.unpack("w2"))
     new(*str.each_slice(64).map{|i| i.to_i(16) })
   end
 
   def to_s(pubkey=nil)
-    #[r, s].pack("w*").unpack("H*")[0]
     [r,s].map{|i| i.to_s(16).rjust(64, '0') }.join
   end
 end
@@ -126,33 +127,8 @@ class PrivateKey < Struct.new(:public_key, :secret_multiplier)
     "%064x" % secret_multiplier
   end
 
-  # uncompressed DER format in binary
-  def to_der
-    # private keys are 279 bytes long (see crypto/ec/cec_asn1.c)
-    [ '308201130201010420' +
-      '%064x' % secret_multiplier +
-      'a081a53081a2020101302c06072a8648ce3d0101022100' +
-      '%064x' % public_key.generator.curve.p +
-      '3006040100040107044104' +
-      '%064x' % public_key.generator.x +
-      '%064x' % public_key.generator.y +
-      '022100' +
-      '%064x' % public_key.generator.order +
-      '020101a14403420004' +
-      '%064x' % public_key.point.x +
-      '%064x' % public_key.point.y ].pack("H*")
-  end
-
-  # # compressed DER format in binary
-  # def to_der_compressed
-  #   [ '06052b8104000a30740201010420' +
-  #     '%064x' % secret_multiplier +
-  #     'a00706052b8104000aa14403420004' +
-  #     '%064x' % public_key.point.x +
-  #     '%064x' % public_key.point.y ].pack("H*")
-  # end
-
   def sign(hash, nonce=nil)
+    hash = Digest::SHA256.hexdigest(hash).to_i(16) if hash.is_a?(String) # data to hash number
     g, n = public_key.generator, public_key.generator.order
     nonce = SecureRandom.random_number(n) + 1 unless nonce
     k = nonce % n
@@ -166,6 +142,7 @@ class PrivateKey < Struct.new(:public_key, :secret_multiplier)
 end
 
 module Secp256k1
+  # secp256k1 specific elliptic curve values / setup
   P  = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
   A  = 0x0000000000000000000000000000000000000000000000000000000000000000
   B  = 0x0000000000000000000000000000000000000000000000000000000000000007
@@ -186,29 +163,12 @@ module Secp256k1
   end
 end
 
-
 pubkey, privkey = Secp256k1.generate
 p [privkey.to_s, pubkey.to_s]
 
-signature = privkey.sign( 100 )
+signature = privkey.sign( "ohai" )
 p signature.to_s
 
-__END__
-pubkey, privkey = Secp256k1.generate
+p pubkey.verify( "nope", signature)
+p pubkey.verify( "ohai", signature)
 
-hash = Secp256k1.nonce
-signature = privkey.sign(hash)
-
-p [privkey.to_s, pubkey.to_s]
-p hash.to_s(16)
-p signature.to_s
-
-p privkey.to_der.size
-p privkey.to_der.unpack("H*")[0]
-
-require 'openssl'
-p OpenSSL::PKey::EC.new(privkey.to_der).private_key.to_i.to_s(16).rjust(64, '0')
-p OpenSSL::PKey::EC.new(privkey.to_der).public_key.to_bn.to_i.to_s(16).rjust(130, '0')
-
-p pubkey.verifies(hash, signature)
-p pubkey.verifies(hash-1, signature)
